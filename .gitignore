@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Environment variables (contains secrets - never commit this)
+.env
+.env.local
+
+# Build output
+dist/
+build/
+
+# Logs
+npm-debug.log*
+*.log
+
+# OS/editor junk
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+
+# Uploaded resident photos (keep the folder, not the files)
+backend/uploads/residents/*
+!backend/uploads/residents/.gitkeep
+
+# Uploaded admin profile photos (keep the folder, not the files)
+backend/uploads/admins/*
+!backend/uploads/admins/.gitkeep
+
+# Uploaded resident ID documents (keep the folder, not the files)
+backend/uploads/resident-ids/*
+!backend/uploads/resident-ids/.gitkeep
+
+# Uploaded complaint evidence (keep the folder, not the files)
+backend/uploads/complaint-evidence/*
+!backend/uploads/complaint-evidence/.gitkeep
+
+# Uploaded announcement images (keep the folder, not the files)
+backend/uploads/announcements/*
+!backend/uploads/announcements/.gitkeep
