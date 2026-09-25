@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS complaints (
   filing_date           DATE NOT NULL DEFAULT CURRENT_DATE,
   description           TEXT,
   priority              TEXT NOT NULL DEFAULT 'Normal',
+  ai_scan_status        TEXT NOT NULL DEFAULT 'not_scanned',
+  ai_scan_score         NUMERIC,
+  ai_scan_checked_at    TIMESTAMPTZ,
   -- Formal blotter / resident-portal fields
   respondent            TEXT,
   respondent_address    TEXT,

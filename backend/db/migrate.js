@@ -54,6 +54,9 @@ async function run() {
   console.log('Ensuring resident-portal columns exist on complaints...');
   await pool.query(`
     ALTER TABLE complaints
+      ADD COLUMN IF NOT EXISTS ai_scan_status TEXT NOT NULL DEFAULT 'not_scanned',
+      ADD COLUMN IF NOT EXISTS ai_scan_score NUMERIC,
+      ADD COLUMN IF NOT EXISTS ai_scan_checked_at TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS respondent TEXT,
       ADD COLUMN IF NOT EXISTS respondent_address TEXT,
       ADD COLUMN IF NOT EXISTS complainant_address TEXT,

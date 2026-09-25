@@ -113,7 +113,7 @@ export default function FileComplaint() {
               <label className="upload-box" htmlFor="evidence" style={{ cursor: 'pointer', display: 'block' }}>
                 <div className="icon">📷</div>
                 <strong>{evidenceFile ? evidenceFile.name : 'Upload photo or document'}</strong>
-                <small>PNG, JPG or PDF (Up to 10MB)</small>
+                <small>PNG, JPG or PDF (Up to 10MB). Files are checked for a valid file signature and reviewed for authenticity.</small>
               </label>
               <input
                 id="evidence"

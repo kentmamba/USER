@@ -31,7 +31,48 @@ const upload = multer({
     },
   }),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB, matches "Up to 10MB" in the mockup
+  fileFilter: (req, file, cb) => {
+    if (!file.mimetype.startsWith('image/') && file.mimetype !== 'application/pdf') {
+      return cb(new Error('Only image or PDF evidence files are allowed.'));
+    }
+    cb(null, true);
+  },
 });
+
+async function hasValidFileSignature(file) {
+  const header = await fs.promises.readFile(file.path, { encoding: null });
+  if (file.mimetype === 'image/jpeg') return header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+  if (file.mimetype === 'image/png') return header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  if (file.mimetype === 'image/gif') return header.subarray(0, 4).toString('ascii') === 'GIF8';
+  if (file.mimetype === 'image/webp') return header.subarray(0, 4).toString('ascii') === 'RIFF' && header.subarray(8, 12).toString('ascii') === 'WEBP';
+  if (file.mimetype === 'application/pdf') return header.subarray(0, 5).toString('ascii') === '%PDF-';
+  return false;
+}
+
+async function scanWithSightengine(file) {
+  if (!file || !file.mimetype.startsWith('image/')) return { status: 'manual_review', score: null };
+  const userId = process.env.SIGHTENGINE_USER_ID;
+  const apiSecret = process.env.SIGHTENGINE_API_SECRET;
+  if (!userId || !apiSecret) return { status: 'not_configured', score: null };
+
+  try {
+    const buffer = await fs.promises.readFile(file.path);
+    const form = new FormData();
+    form.append('media', new Blob([buffer], { type: file.mimetype }), file.originalname);
+    form.append('models', 'genai');
+    form.append('api_user', userId);
+    form.append('api_secret', apiSecret);
+    const response = await fetch('https://api.sightengine.com/1.0/check.json', { method: 'POST', body: form });
+    if (!response.ok) throw new Error(`Sightengine returned ${response.status}`);
+    const data = await response.json();
+    const score = Number(data.type?.ai_generated ?? data.ai_generated ?? data.genai?.ai_generated ?? data.genai?.score);
+    if (!Number.isFinite(score)) return { status: 'manual_review', score: null };
+    return { status: score >= 0.8 ? 'possibly_ai_generated' : score <= 0.2 ? 'likely_authentic' : 'manual_review', score };
+  } catch (err) {
+    console.error('[sightengine] scan failed:', err.message);
+    return { status: 'provider_unavailable', score: null };
+  }
+}
 
 function toComplaint(c) {
   return {
@@ -42,6 +83,9 @@ function toComplaint(c) {
     filingDate: c.filing_date,
     description: c.description,
     priority: c.priority,
+    aiScanStatus: c.ai_scan_status,
+    aiScanScore: c.ai_scan_score,
+    aiScanCheckedAt: c.ai_scan_checked_at,
     respondent: c.respondent,
     respondentAddress: c.respondent_address,
     complainantAddress: c.complainant_address,
@@ -62,6 +106,10 @@ router.post('/', (req, res) => {
     }
 
     try {
+      if (req.file && !(await hasValidFileSignature(req.file))) {
+        fs.unlink(req.file.path, () => {});
+        return res.status(400).json({ message: 'The evidence file failed type validation. Please upload the original image or PDF.' });
+      }
       const {
         category, description, respondent, respondentAddress, complainantAddress,
         narrative, reliefSought,
@@ -84,16 +132,17 @@ router.post('/', (req, res) => {
       const id = `${prefix}-${year}-${seq}`;
 
       const attachmentUrl = req.file ? `/uploads/complaint-evidence/${req.file.filename}` : null;
+      const aiScan = req.file ? await scanWithSightengine(req.file) : { status: 'not_scanned', score: null };
 
       const { rows } = await pool.query(
         `INSERT INTO complaints
-          (id, resident, category, status, filing_date, description, priority,
+          (id, resident, category, status, filing_date, description, priority, ai_scan_status, ai_scan_score, ai_scan_checked_at,
            respondent, respondent_address, complainant_address, narrative, relief_sought,
            attachment_url, filed_by_resident_id)
-         VALUES ($1,$2,$3,'Pending',CURRENT_DATE,$4,'Normal',$5,$6,$7,$8,$9,$10,$11)
+         VALUES ($1,$2,$3,'Pending',CURRENT_DATE,$4,'Normal',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING *`,
         [
-          id, residentName, category, description || narrative || '', respondent || null,
+          id, residentName, category, description || narrative || '', aiScan.status, aiScan.score, req.file ? new Date() : null, respondent || null,
           respondentAddress || null, complainantAddress || null, narrative || null,
           reliefSought || null, attachmentUrl, req.resident.id,
         ]
@@ -118,6 +167,36 @@ router.get('/', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Database error loading complaints.' });
+  }
+});
+
+// GET /api/resident/complaints/escalations
+// Returns formal escalation letters linked to the logged-in resident's cases.
+router.get('/escalations', async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT e.id, e.category, e.reason, e.priority, e.status, e.subject, e.case_ref,
+              e.created_at, c.id AS complaint_id
+       FROM escalations e
+       INNER JOIN complaints c ON c.id = e.case_ref
+       WHERE c.filed_by_resident_id = $1
+       ORDER BY e.created_at DESC`,
+      [req.resident.id]
+    );
+    res.json(rows.map((e) => ({
+      id: e.id,
+      category: e.category,
+      reason: e.reason,
+      priority: e.priority,
+      status: e.status,
+      subject: e.subject,
+      caseRef: e.case_ref,
+      complaintId: e.complaint_id,
+      createdAt: e.created_at,
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Database error loading escalation updates.' });
   }
 });
 

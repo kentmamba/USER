@@ -238,6 +238,10 @@ export async function getMyComplaints() {
   return rows.map(toLegacyComplaint);
 }
 
+export async function getMyEscalations() {
+  return request('/resident/complaints/escalations');
+}
+
 export async function trackComplaint(ref) {
   const c = await request(`/resident/complaints/${encodeURIComponent(ref)}`);
   return toLegacyComplaint(c);
